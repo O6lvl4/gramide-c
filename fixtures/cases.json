@@ -1,0 +1,28 @@
+{
+  "good": {
+    "collections.c": [
+      "Point",
+      "Direction",
+      "Size",
+      "sum",
+      "main",
+      "Point.x",
+      "Point.y"
+    ],
+    "api.h": [
+      "Reader",
+      "read_value",
+      "measure",
+      "Reader.name",
+      "Reader.offset",
+      "first",
+      "second",
+      "third",
+      "count"
+    ]
+  },
+  "bad": [
+    "broken.c",
+    "unclosed.c"
+  ]
+}

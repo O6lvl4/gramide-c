@@ -1,0 +1,29 @@
+import gramide.parser
+import gramide.tree
+import gramide.tags
+import self.grammar
+import self.lexer
+import self.symbols
+import self.table
+
+test "C grouped prototypes have function kinds and pointer variables remain variables" {
+  let source = "int first(int x), second(int y); int third(void), count; int (*callback)(int);"
+  let raw = bytes.from_string(source)
+  let tokens = lexer.scan(source, false)!
+  let parsed = parser.parse_with(table.compiled(), raw, tokens)!
+  let dynamic = parser.parse(grammar.rules(), raw, tokens)!
+  assert_eq(tree.sexp(parsed.root, parsed.names), tree.sexp(dynamic.root, dynamic.names))
+  let definitions = tags.of_tree(parsed.root, tokens, raw, parsed.names, ".", symbols.symbol_rules())
+    |> list.filter((t) => t.role == "def")
+  assert_eq(list.map(definitions, (t) => (t.name, t.kind)), [("first", "function"), ("second", "function"), ("third", "function"), ("count", "var"), ("callback", "var")])
+}
+
+test "C type references are not duplicate declarations and fields are qualified" {
+  let source = "struct Point { int x; }; struct Point origin;"
+  let raw = bytes.from_string(source)
+  let tokens = lexer.scan(source, false)!
+  let parsed = parser.parse_with(table.compiled(), raw, tokens)!
+  let definitions = tags.of_tree(parsed.root, tokens, raw, parsed.names, ".", symbols.symbol_rules())
+    |> list.filter((t) => t.role == "def")
+  assert_eq(list.map(definitions, (t) => t.name), ["Point", "Point.x", "origin"])
+}

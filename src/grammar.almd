@@ -1,0 +1,103 @@
+// Original C core reader, written from the C11 syntax model (N1570, §6).
+// Typedef-name classification and preprocessing need compiler context; this
+// package deliberately does not advertise a compiler/write-gate verdict.
+import gramide.parser
+import gramide.parser.{ tok, lit, keep, r, seq, alt, rep, rep1, opt, wrap, field, prec, lits, keeps, grammar, recover }
+import self.lexer
+
+let ident = tok("identifier")
+let qualifiers = rep(lits(["const", "volatile", "restrict", "_Atomic"]))
+let storage = rep(lits(["extern", "static", "auto", "register", "inline", "_Noreturn", "_Thread_local"]))
+fn comma(x: parser.Rule) -> parser.Rule = seq([x, rep(seq([lit(","), x]))])
+fn list_of(x: parser.Rule) -> parser.Rule = opt(comma(x))
+let pointers = rep(seq([lit("*"), qualifiers]))
+
+fn rules() -> parser.Grammar = grammar("translation_unit", [
+  ("translation_unit", wrap("translation_unit", rep(recover(r("external"))))),
+  ("external", alt([wrap("preprocessor_directive", tok("comment")), r("function"), r("prototype"), r("typedef"), r("declaration"), lit(";")])),
+  ("function", wrap("function_definition", seq([storage, r("type"), pointers, field("name", ident), r("parameters"), r("block")]))),
+  ("prototype", wrap("function_declaration", seq([storage, r("type"), pointers, field("name", ident), r("parameters"), lit(";")]))),
+  ("typedef", wrap("type_definition", seq([lit("typedef"), r("type"), pointers, field("name", ident), rep(r("array_suffix")), lit(";")]))),
+  ("declaration", wrap("declaration", seq([storage, r("type"), opt(comma(r("init_declarator"))), lit(";")]))),
+  ("init_declarator", alt([
+    wrap("function_declaration", seq([pointers, field("name", ident), r("parameters")])),
+    wrap("variable_declaration", seq([r("declarator"), opt(seq([lit("="), r("initializer")]))]))
+  ])),
+  ("declarator", seq([pointers, alt([field("name", ident), seq([lit("("), r("declarator"), lit(")")])]), rep(alt([r("array_suffix"), r("parameters")]))])),
+  ("array_suffix", wrap("array_declarator", seq([lit("["), qualifiers, opt(r("assignment")), lit("]")]))),
+  ("parameters", wrap("parameters", seq([lit("("), list_of(alt([lit("..."), r("parameter")])), lit(")")]))),
+  ("parameter", wrap("parameter", seq([r("type"), pointers, opt(seq([field("name", ident), rep(r("array_suffix"))]))]))),
+  ("type", seq([qualifiers, alt([
+    r("struct"), r("enum"),
+    wrap("builtin_type", rep1(lits(["void", "char", "short", "int", "long", "float", "double", "signed", "unsigned", "_Bool", "_Complex"]))),
+    wrap("type_name", ident)
+  ]), qualifiers])),
+  ("type_name", seq([r("type"), pointers])),
+  ("struct", alt([
+    wrap("struct_specifier", seq([lits(["struct", "union"]), opt(field("name", ident)), r("struct_body")])),
+    wrap("type_name", seq([lits(["struct", "union"]), field("name", ident)]))
+  ])),
+  ("struct_body", seq([lit("{"), rep(recover(r("field_declaration"))), lit("}")])),
+  ("field_declaration", wrap("field_declaration", seq([r("type"), comma(r("field")), lit(";")]))),
+  ("field", wrap("field", seq([r("declarator"), opt(seq([lit(":"), r("assignment")]))]))),
+  ("enum", alt([
+    wrap("enum_specifier", seq([lit("enum"), opt(field("name", ident)), r("enum_body")])),
+    wrap("type_name", seq([lit("enum"), field("name", ident)]))
+  ])),
+  ("enum_body", seq([lit("{"), comma(r("enumerator")), opt(lit(",")), lit("}")])),
+  ("enumerator", wrap("enumerator", seq([field("name", ident), opt(seq([lit("="), r("assignment")]))]))),
+  ("initializer", alt([
+    wrap("initializer_list", seq([lit("{"), opt(seq([comma(r("initializer_item")), opt(lit(","))])), lit("}")])),
+    r("assignment")
+  ])),
+  ("initializer_item", seq([opt(seq([rep1(alt([seq([lit("."), ident]), seq([lit("["), r("expression"), lit("]")])])), lit("=")])), r("initializer")])),
+  ("block", wrap("compound_statement", seq([lit("{"), rep(recover(r("statement"))), lit("}")]))),
+  ("statement", alt([
+    wrap("preprocessor_directive", tok("comment")), r("block"), r("typedef"),
+    wrap("if_statement", seq([lit("if"), lit("("), r("expression"), lit(")"), r("statement"), opt(seq([lit("else"), r("statement")]))])),
+    wrap("while_statement", seq([lit("while"), lit("("), r("expression"), lit(")"), r("statement")])),
+    wrap("do_statement", seq([lit("do"), r("statement"), lit("while"), lit("("), r("expression"), lit(")"), lit(";")])),
+    wrap("for_statement", seq([lit("for"), lit("("), alt([r("declaration"), seq([opt(r("expression")), lit(";")])]), opt(r("expression")), lit(";"), opt(r("expression")), lit(")"), r("statement")])),
+    wrap("switch_statement", seq([lit("switch"), lit("("), r("expression"), lit(")"), r("statement")])),
+    wrap("case_statement", seq([alt([seq([lit("case"), r("assignment")]), lit("default")]), lit(":"), r("statement")])),
+    wrap("return_statement", seq([lit("return"), opt(r("expression")), lit(";")])),
+    wrap("jump_statement", alt([seq([lits(["break", "continue"]), lit(";")]), seq([lit("goto"), ident, lit(";")])])),
+    wrap("labeled_statement", seq([ident, lit(":"), r("statement")])),
+    r("declaration"),
+    wrap("expression_statement", seq([opt(r("expression")), lit(";")]))
+  ])),
+  ("expression", wrap("expression", comma(r("assignment")))),
+  ("assignment", seq([r("conditional"), opt(seq([field("operator", keeps(["=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "^=", "|="])), r("assignment")]))])),
+  ("conditional", seq([r("binary"), opt(seq([lit("?"), r("expression"), lit(":"), r("conditional")]))])),
+  ("binary", prec("binary_expression", r("unary"), [keep("||"), keep("&&"), keep("|"), keep("^"), keep("&"), keeps(["==", "!="]), keeps(["<", ">", "<=", ">="]), keeps(["<<", ">>"]), keeps(["+", "-"]), keeps(["*", "/", "%"])])),
+  ("unary", alt([
+    wrap("unary_expression", seq([keeps(["++", "--", "&", "*", "+", "-", "~", "!"]), r("unary")])),
+    wrap("sizeof_expression", seq([lit("sizeof"), alt([seq([lit("("), r("type_name"), lit(")")]), r("unary")])])),
+    wrap("cast_expression", seq([lit("("), r("type_name"), lit(")"), r("unary")])),
+    r("postfix")
+  ])),
+  ("postfix", seq([r("primary"), rep(alt([
+    wrap("arguments", seq([lit("("), list_of(r("assignment")), lit(")")])),
+    wrap("subscript_expression", seq([lit("["), r("expression"), lit("]")])),
+    wrap("field_access", seq([lits([".", "->"]), field("field", ident)])),
+    wrap("update_expression", keeps(["++", "--"]))
+  ]))])),
+  ("primary", alt([ident, tok("number"), tok("rune"), wrap("string_literal", rep1(tok("string"))), seq([lit("("), r("expression"), lit(")")])])),
+])
+
+fn parses(src: String) -> Bool = match lexer.scan(src, false) {
+  ok(tokens) => result.is_ok(parser.parse(rules(), bytes.from_string(src), tokens)),
+  err(_) => false,
+}
+
+test "C declarations statements and expression precedence" {
+  assert(parses("#include <stdio.h>\nstruct Point { int x; int y; };\nenum Mode { FIRST = 1, SECOND, };\ntypedef unsigned long Size;\nstatic int sum(const int *xs, int n) { int value = 0; for (int i = 0; i < n; i++) { value += xs[i]; } return value; }"))
+  assert(parses("int main(void) { struct Point p = { .x = 1, .y = 2 }; if (p.x > 0) return sum(0, 0); else return -1; }"))
+  assert(parses("int read(int n); int *values[4]; int choose(int n) { switch(n) { case 1: return 2; default: return 0; } }"))
+}
+
+test "C strict parsing refuses missing operands names and delimiters" {
+  for bad in ["int f(void) { return 1 +; }", "int (void) {}", "int f(void) { int x = ; }", "int f(void) { return 1;", "struct X { int y };"] {
+    assert(not parses(bad))
+  }
+}

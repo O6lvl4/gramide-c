@@ -1,0 +1,7 @@
+import gramide.package_api
+fn symbol_rules() -> package_api.SymbolRules = package_api.SymbolRules {
+  declarations: [("function_definition", "function"), ("function_declaration", "function"), ("type_definition", "type"), ("struct_specifier", "type"), ("enum_specifier", "enum"), ("enumerator", "const"), ("variable_declaration", "var"), ("field", "field")],
+  scopes: ["struct_specifier", "enum_specifier"], namespaces: ["struct_specifier"], callables: ["function_definition", "function_declaration"],
+  lexical_owners: false, envelopes: [], unnamed_envelopes: ["declaration", "field_declaration"],
+  arguments: "arguments", field_access: "field_access", type_mentions: ["type_name"]
+}
